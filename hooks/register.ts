@@ -292,14 +292,12 @@ async function streamSpeech($: $, key: string, text: string): Promise<void> {
       $,
       'play.ps1',
       [tag, bodyPath, await dataPath($, CURRENT_FILE), cfg.ttsModel, `${FISH}/v1/tts`],
-      { stdin: `Authorization: Bearer ${key}
-`, timeoutMs: 180_000 },
+      { stdin: `Authorization: Bearer ${key}\n`, timeoutMs: 180_000 },
     )
     const status = /returned error: (\d+)/.exec(ran.stderr)?.[1]
     if (status !== undefined) $.ui.toast(fishError('text-to-speech', Number(status), ''), { timeoutMs: 8000 })
     else if (ran.stderr.includes('claudespeak:')) {
-      $.ui.toast(ran.stderr.trim().split('
-').pop()?.slice(0, 100) ?? 'claudespeak: playback failed', { timeoutMs: 8000 })
+      $.ui.toast(ran.stderr.trim().split('\n').pop()?.slice(0, 100) ?? 'claudespeak: playback failed', { timeoutMs: 8000 })
     }
   } finally {
     if (st.streamTag === tag) st.streamTag = undefined
