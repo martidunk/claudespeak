@@ -294,7 +294,8 @@ async function streamSpeech($: $, key: string, text: string): Promise<void> {
       [tag, bodyPath, await dataPath($, CURRENT_FILE), cfg.ttsModel, `${FISH}/v1/tts`],
       { stdin: `Authorization: Bearer ${key}\n`, timeoutMs: 180_000 },
     )
-    const status = /returned error: (\d+)/.exec(ran.stderr)?.[1]
+    await debugLog($, `play.ps1 exit=${ran.exitCode} stderr=${JSON.stringify(ran.stderr.slice(0, 200))}`)
+    const status =/returned error: (\d+)/.exec(ran.stderr)?.[1]
     if (status !== undefined) $.ui.toast(fishError('text-to-speech', Number(status), ''), { timeoutMs: 8000 })
     else if (ran.stderr.includes('claudespeak:')) {
       $.ui.toast(ran.stderr.trim().split('\n').pop()?.slice(0, 100) ?? 'claudespeak: playback failed', { timeoutMs: 8000 })
@@ -312,6 +313,7 @@ async function speak($: $, answer: string): Promise<void> {
   const key = await apiKey($)
   if (key === undefined) return askForKey($)
   const line = await summarize($, answer)
+  await debugLog($, `speak: line=${JSON.stringify(line.slice(0, 60))} superseded=${gen !== st.speechGen}`)
   if (line === '' || gen !== st.speechGen) return
   const current = await $.fs.read(await dataPath($, CURRENT_FILE)).catch(() => '')
   if (current.startsWith('stopped ') && Number(current.slice(8)) > startedAt) return
@@ -322,9 +324,43 @@ async function speak($: $, answer: string): Promise<void> {
  * Whether a reply here may be read aloud: a person's session, never a scheduled run,
  * a claude started from inside another session's tools, Cowork, -p or an SDK host.
  */
+/**
+ * Debug trace, off unless ~/.claude/claudespeak/debug.log exists: create that file
+ * to switch it on, delete it to switch it off. Never throws.
+ */
+async function debugLog($: $, msg: string): Promise<void> {
+  try {
+    const path = await dataPath($, 'debug.log')
+    if (!(await $.fs.exists(path).catch(() => false))) return
+    const old = await $.fs.read(path).catch(() => '')
+    await $.fs.write(path, `${old}${new Date().toISOString()} ${msg}\n`)
+  } catch {
+    // tracing must never break speech
+  }
+}
+
+async function envSnapshot($: $): Promise<string> {
+  // $.env.get must be called with a literal name (the engine lists what a module reads).
+  const out = {
+    entrypoint: await $.env.get('CLAUDE_CODE_ENTRYPOINT').catch(() => 'ERR'),
+    attended: await $.env.get('CLAUDE_CODE_SESSION_ATTENDED').catch(() => 'ERR'),
+    child: await $.env.get('CLAUDE_CODE_CHILD_SESSION').catch(() => 'ERR'),
+    scheduled: await $.env.get('CLAUDE_CODE_HOST_SCHEDULED_RUN').catch(() => 'ERR'),
+  }
+  return `${JSON.stringify(out)} isInteractive=${st.isInteractive}`
+}
+
 async function mayTalkHere($: $): Promise<boolean> {
-  if (await $.env.get('CLAUDE_CODE_CHILD_SESSION')) return false
   if (await $.env.get('CLAUDE_CODE_HOST_SCHEDULED_RUN')) return false
+  // The desktop app's Code tab marks its sessions as child sessions, reports no surface and
+  // is not "interactive". After a plugin reload only CLAUDE_CODE_ENTRYPOINT reliably reaches
+  // the module (SESSION_ATTENDED reads empty), so trust the entrypoint unless told it's unattended.
+  if (
+    (await $.env.get('CLAUDE_CODE_ENTRYPOINT')) === 'claude-desktop' &&
+    (await $.env.get('CLAUDE_CODE_SESSION_ATTENDED')) !== '0'
+  )
+    return true
+  if (await $.env.get('CLAUDE_CODE_CHILD_SESSION')) return false
   if ((await $.env.get('CLAUDE_CODE_ENTRYPOINT')) === 'local-agent') return false
   if (st.isInteractive) return true
   return ((await $.session.surfaces().catch(() => [])) ?? []).length > 0
@@ -382,9 +418,14 @@ export const register: Register = (on, options) => {
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
     const isMainAnswer = e.agentId === undefined && e.reason === 'answer' && e.answer.trim() !== ''
+    await debugLog($, `turn.complete agentId=${e.agentId} reason=${e.reason} main=${isMainAnswer}`)
     if (!isMainAnswer) return result
-    if (!(await mayTalkHere($)) || !(await isSettingOn($))) return result
+    const mayTalk = await mayTalkHere($)
+    const isOn = await isSettingOn($)
+    await debugLog($, `mayTalk=${mayTalk} isOn=${isOn} voice=${cfg.voiceId} model=${cfg.ttsModel} env=${await envSnapshot($)}`)
+    if (!mayTalk || !isOn) return result
     void speak($, e.answer).catch(err => {
+      void debugLog($, `speak threw: ${err instanceof Error ? err.message : String(err)}`)
       $.ui.toast(`claudespeak: ${err instanceof Error ? err.message.slice(0, 100) : 'speech failed'}`)
     })
     return result
