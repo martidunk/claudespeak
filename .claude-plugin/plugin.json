@@ -1,6 +1,6 @@
 {
   "name": "claudespeak",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": { "name": "albertshiney" },
   "repository": "https://github.com/martidunk/claudespeak",
   "description": "Reads a 1-3 sentence summary of each finished Claude Code reply aloud with Fish Audio, one voice at a time across sessions",

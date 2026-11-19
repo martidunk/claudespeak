@@ -54,6 +54,14 @@ Both are constants at the top of `hooks/register.ts`:
 - `DEFAULTS.voiceId`: the Fish voice, Sawyer by default. It is also an option in the plugin's settings.
 - `SPEECH_SPEED`: 1.1 by default, Fish's `prosody.speed` (0.5 to 2.0).
 
+## A face: PIC (optional)
+
+If [PIC](https://github.com/martidunk/PIC) is running, `play.ps1` hands it each clip over the named pipe
+`PIC.Speak.v1`, and a face pops up from the tray and lip-syncs the reply. `play.ps1` waits until she has
+finished, just like `SoundPlayer.PlaySync()`. If PIC isn't running, or it answers with an error, the clip plays
+the usual way (that check costs about 0.3 s). `stop.ps1` also tells PIC to stop, because killing the player
+process doesn't silence her.
+
 ## Cost
 
 Every spoken reply uses Fish Audio credits, and because it is on by default that means every reply in every session a person is attached to. Long replies also use one Haiku call on your Claude account to write the summary. Use `/speak off` to stop both.

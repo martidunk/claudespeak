@@ -25,6 +25,27 @@ function Stop-OtherSpeech {
     ForEach-Object { & taskkill.exe /F /T /PID $_.ProcessId *> $null }
 }
 
+function Send-ToPic([string]$Path) {
+  # PIC (github.com/martidunk/PIC) is an optional tray face that lip-syncs the clip.
+  # If it's listening, hand it the WAV and wait until it has finished, just like PlaySync.
+  # Returns $false when PIC isn't running or fails, so the caller plays the clip itself.
+  $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', 'PIC.Speak.v1', [System.IO.Pipes.PipeDirection]::InOut)
+  try {
+    try { $pipe.Connect(300) } catch { return $false }
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $writer = New-Object System.IO.StreamWriter($pipe, $utf8)
+    $writer.AutoFlush = $true
+    $reader = New-Object System.IO.StreamReader($pipe, $utf8)
+    $writer.WriteLine("say $Path")
+    $reply = $reader.ReadLine()
+    return ($reply -eq 'done' -or $reply -eq 'interrupted')
+  } catch {
+    return $false
+  } finally {
+    $pipe.Dispose()
+  }
+}
+
 try {
   Set-Content -LiteralPath $CurrentFile -Value $Tag -NoNewline -Encoding ascii
   Stop-OtherSpeech
@@ -58,6 +79,8 @@ try {
     [BitConverter]::GetBytes([uint32]($bytes.Length - $dataAt - 8)).CopyTo($bytes, $dataAt + 4)
     [IO.File]::WriteAllBytes($wav, $bytes)
   }
+
+  if (Send-ToPic ([IO.Path]::GetFullPath($wav))) { exit 0 }
 
   $player = New-Object System.Media.SoundPlayer $wav
   $player.PlaySync()
